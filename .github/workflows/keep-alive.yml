@@ -151,7 +151,9 @@ jobs:
             exit 0
           fi
 
-          gh workflow run keep-alive.yml --ref "$WF_REF"
+          # -R is mandatory: this job has no checkout, so gh cannot infer the
+          # repository from a local .git directory.
+          gh workflow run keep-alive.yml --ref "$WF_REF" -R "$REPO"
           echo "Next chain run dispatched — the pinger keeps running continuously."
 
 # SubhanaLLAH, WalhamduliLLAH, Walaailaaha-illa-ALLAH, WaLLAHU-AKBAR,
