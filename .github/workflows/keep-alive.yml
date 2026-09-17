@@ -1,0 +1,156 @@
+# Bismillah Ar-Rahman Ar-Raheem. Ash-hadu an laa ilaaha illa-Llah, wa ash-hadu
+# anna Muhammadan Abduhu wa Rasooluh. Laa hawla wa laa quwwata illaa biLLAH.
+# Hasbiyallaahu laa ilaaha illaa Huwa, 'alayhi tawakkaltu wa Huwa
+# Rabbul-'Arshil-'Azeem. SubhaanALLAH wa bihamdih, SubhaanALLAHil-'azeem.
+#
+# ============================================================================
+# Keep-Alive Pinger (public-repo edition — always-on self-rescheduling chain)
+# ----------------------------------------------------------------------------
+# Purpose : GET the configured service URL(s) continuously so idle hosts
+#           (e.g. lightning.ai free-plan machines that autosleep after a few
+#           idle minutes) NEVER go to sleep. Ping the ROOT url of each host —
+#           on wake-on-traffic platforms only the main url wakes the machine;
+#           sub-pages do not.
+#
+# Why a chain?  GitHub's *scheduled* workflows are delayed/dropped under load
+# (live testing 2026-09-17: a */5 cron produced a single run in 3 hours), and
+# a scheduled cron cannot fire more often than every 5 minutes. This workflow
+# therefore RESCHEDULES ITSELF: every run pings the targets, sleeps
+# PING_INTERVAL_SECONDS (default 330 = 5.5 min), then dispatches the next run
+# via the Actions API. Two offset cron lines act only as backstops that re-seed
+# the chain if it ever dies. Net effect: a ping round every ~5.5 minutes,
+# around the clock, independent of GitHub's scheduler jitter.
+# This repo is PUBLIC, so Actions minutes are free — the chain costs nothing.
+#
+# Security posture (no security issue by design):
+#   - No personal access token is stored anywhere: the run uses the built-in
+#     GITHUB_TOKEN, scoped to permissions.actions=write only.
+#   - No third-party Actions and no checkout: only curl + the preinstalled gh.
+#   - All external inputs (URLs) enter as environment variables, never as
+#     shell-interpolated GitHub Expressions — script injection is ruled out.
+#   - URLs are validated to be absolute http(s) URLs; curl is invoked with
+#     '--' so an argument can never be parsed as a flag; query strings are
+#     never logged (they may embed tokens).
+#
+# Customization (no code edit needed):
+#   - URLs     : repo VARIABLE vars.PING_URLS (comma/space/newline separated)
+#                or repo SECRET secrets.PING_URLS if URLs must stay hidden.
+#   - Interval : repo VARIABLE vars.PING_INTERVAL_SECONDS (default 330 s).
+# Docs    : see KEEP_ALIVE.md at repository root.
+# ============================================================================
+
+name: Keep-Alive Pinger
+
+on:
+  schedule:
+    # Backstop backbone — re-seeds the chain if a handoff ever fails.
+    - cron: '*/5 * * * *'
+    # Offset backstop (avoids the top-of-hour scheduler stampede).
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      override_urls:
+        description: 'Optional: URLs to ping for THIS run only (comma/space separated). Leave empty to use the configured URLs.'
+        required: false
+        default: ''
+
+permissions:
+  actions: write          # needed only to dispatch the next chain run
+  contents: none
+
+concurrency:
+  group: keep-alive-pinger
+  cancel-in-progress: true    # a newer backstop replaces a hung/sleeping run
+
+jobs:
+  ping:
+    name: Ping + reschedule chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Ping configured URLs (curl only)
+        env:
+          PING_URLS_OVERRIDE: ${{ github.event.inputs.override_urls }}
+          PING_URLS_VAR: ${{ vars.PING_URLS }}       # repo VARIABLE (Settings → Secrets and variables → Actions → Variables)
+          PING_URLS_SECRET: ${{ secrets.PING_URLS }} # repo SECRET (use if URLs must stay hidden)
+          PING_URLS_DEFAULT: 'https://9001-01m2paqfkv4npk7qny04t0e7q7.cloudspaces.litng.ai/'
+        run: |
+          set -u
+
+          # ---- Resolve URL list: override → variable → secret → default ----
+          URLS="${PING_URLS_OVERRIDE:-}"
+          if [ -z "$URLS" ]; then URLS="${PING_URLS_VAR:-}"; fi
+          if [ -z "$URLS" ]; then URLS="${PING_URLS_SECRET:-}"; fi
+          if [ -z "$URLS" ]; then URLS="${PING_URLS_DEFAULT:-}"; fi
+          # Support comma-separated AND whitespace-separated lists.
+          URLS="$(printf '%s' "$URLS" | tr ',\r' '  ')"
+
+          ok=0; bad=0; total=0
+          summary="$(mktemp)"
+          {
+            echo "### Keep-Alive Pinger — $(date -u '+%Y-%m-%d %H:%M:%SZ')"
+            echo
+            echo "| Target (origin only — query strings are not logged) | HTTP status |"
+            echo "| --- | --- |"
+          } > "$summary"
+
+          for url in $URLS; do
+            # ---- Validation (security): must be an absolute http(s) URL ----
+            case "$url" in
+              https://*|http://*) : ;;
+              *) echo "::warning::Skipping invalid URL entry: $url"; continue ;;
+            esac
+            total=$((total+1))
+            # '--' ensures the URL can never be parsed as a curl flag. Even a
+            # timeout still delivered traffic (which is what wakes the host).
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 45 --retry 1 --retry-delay 1 -- "$url" 2>/dev/null || echo 000)"
+            display="${url%%\?*}"   # never echo query strings (may embed tokens)
+            echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $display -> HTTP $code"
+            echo "| $display | $code |" >> "$summary"
+            case "$code" in
+              2*|3*) ok=$((ok+1)) ;;
+              *) bad=$((bad+1)); echo "::warning::$display answered HTTP $code (the request still wakes the target)" ;;
+            esac
+          done
+
+          {
+            cat "$summary"
+            echo
+            echo "Targets: $total · OK: $ok · Not-OK: $bad"
+          } > "$GITHUB_STEP_SUMMARY"
+          rm -f "$summary"
+          if [ "$total" -eq 0 ]; then
+            echo "::error::No valid URLs configured. Set repo VARIABLE vars.PING_URLS (or SECRET secrets.PING_URLS), pass override_urls on manual dispatch, or edit PING_URLS_DEFAULT."
+          fi
+          echo "Ping round complete — $ok/$total responded OK."
+
+      - name: Reschedule the next chain run (always-on, not just once)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SELF_RUN_ID: ${{ github.run_id }}
+          WF_REF: ${{ github.ref_name }}
+          SLEEP_SECONDS_VAR: ${{ vars.PING_INTERVAL_SECONDS }}
+        run: |
+          set -euo pipefail
+          SLEEP_SECONDS="${SLEEP_SECONDS_VAR:-330}"
+          case "$SLEEP_SECONDS" in ''|*[!0-9]*) SLEEP_SECONDS=330 ;; esac
+          [ "$SLEEP_SECONDS" -lt 60 ]  && SLEEP_SECONDS=60    # never hammer the target
+          [ "$SLEEP_SECONDS" -gt 540 ] && SLEEP_SECONDS=540   # stay under 10 minutes
+          echo "Chain heartbeat: sleeping ${SLEEP_SECONDS}s before dispatching the next run..."
+          sleep "$SLEEP_SECONDS"
+
+          # Guard: hand off only if no OTHER run of this workflow is active or
+          # queued (a backstop cron about to fire will carry the chain instead).
+          busy="$(gh api "repos/$REPO/actions/runs?per_page=60" \
+            --jq "[.workflow_runs[] | select(.name==\"Keep-Alive Pinger\" and .id != $SELF_RUN_ID and (.status==\"queued\" or .status==\"in_progress\"))] | length" || echo 0)"
+          if [ "${busy:-0}" -gt 0 ]; then
+            echo "Another pinger run is active/queued ($busy) — it carries the chain; no extra dispatch."
+            exit 0
+          fi
+
+          gh workflow run keep-alive.yml --ref "$WF_REF"
+          echo "Next chain run dispatched — the pinger keeps running continuously."
+
+# SubhanaLLAH, WalhamduliLLAH, Walaailaaha-illa-ALLAH, WaLLAHU-AKBAR,
+# Walahawla-walakuwata-illabiLLAH. Astaghfirullaaha wa atoobu ilayh.

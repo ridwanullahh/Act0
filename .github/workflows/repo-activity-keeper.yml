@@ -1,0 +1,61 @@
+# Bismillah Ar-Rahman Ar-Raheem. Ash-hadu an laa ilaaha illa-Llah, wa ash-hadu
+# anna Muhammadan Abduhu wa Rasooluh. Laa hawla wa laa quwwata illaa biLLAH.
+# Hasbiyallaahu laa ilaaha illaa Huwa, 'alayhi tawakkaltu wa Huwa
+# Rabbul-'Arshil-'Azeem. SubhaanALLAH wa bihamdih, SubhaanALLAHil-'azeem.
+#
+# ============================================================================
+# Repo Activity Keeper
+# ----------------------------------------------------------------------------
+# GitHub automatically disables scheduled workflows after 60 days without any
+# repository activity (commits, issues, PRs). This workflow checks (roughly
+# every 10 days) whether the repo has been idle for more than 30 days and, if
+# so, pushes a tiny one-line activity stamp. This guarantees the Keep-Alive
+# Pinger schedule is never auto-disabled. The chain itself keeps pinging
+# meanwhile — this keeper only protects the backstop crons.
+# Docs: KEEP_ALIVE.md at repository root.
+# ============================================================================
+
+name: Repo Activity Keeper
+
+on:
+  schedule:
+    - cron: '23 3 */10 * *'   # every ~10 days at 03:23 UTC (exits in seconds unless a stamp is needed)
+  workflow_dispatch:
+
+permissions:
+  contents: write             # needed only when an idle-stamp commit is required
+
+concurrency:
+  group: repo-activity-keeper
+  cancel-in-progress: false
+
+jobs:
+  keep-active:
+    name: Stamp repo activity if idle > 30 days
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout (full history, for the idle check)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Commit activity stamp only if the repo is idle
+        run: |
+          set -euo pipefail
+          if [ -n "$(git log -1 --since='30 days ago' --oneline)" ]; then
+            echo "Repository had commits in the last 30 days — no stamp needed."
+            exit 0
+          fi
+          git config user.name  "keepalive-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p .github
+          date -u '+%Y-%m-%dT%H:%M:%SZ' > .github/.activity-stamp
+          git add .github/.activity-stamp
+          git commit -m "chore: periodic activity stamp (keeps scheduled workflows enabled under GitHub's 60-day idle rule)"
+          git push
+          echo "Activity stamp pushed."
+
+# SubhanaLLAH, WalhamduliLLAH, Walaailaaha-illa-ALLAH, WaLLAHU-AKBAR,
+# Walahawla-walakuwata-illabiLLAH. Astaghfirullaaha wa atoobu ilayh.
