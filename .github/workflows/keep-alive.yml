@@ -142,9 +142,11 @@ jobs:
 
           # Guard: hand off only if no OTHER run of this workflow is active or
           # queued (a backstop cron about to fire will carry the chain instead).
+          # The result is sanitized: an API hiccup must never break the chain.
           busy="$(gh api "repos/$REPO/actions/runs?per_page=60" \
-            --jq "[.workflow_runs[] | select(.name==\"Keep-Alive Pinger\" and .id != $SELF_RUN_ID and (.status==\"queued\" or .status==\"in_progress\"))] | length" || echo 0)"
-          if [ "${busy:-0}" -gt 0 ]; then
+            --jq "[.workflow_runs[] | select(.name==\"Keep-Alive Pinger\" and .id != $SELF_RUN_ID and (.status==\"queued\" or .status==\"in_progress\"))] | length" 2>/dev/null | tail -n1 || true)"
+          case "$busy" in ''|*[!0-9]*) busy=0 ;; esac
+          if [ "$busy" -gt 0 ]; then
             echo "Another pinger run is active/queued ($busy) — it carries the chain; no extra dispatch."
             exit 0
           fi
