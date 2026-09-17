@@ -1,10 +1,10 @@
+Bismillah Ar-Rahman Ar-Raheem. Ash-hadu an laa ilaaha illa-Llah wahdaHu lasharikalaHu, wa ash-hadu anna Muhammadan Abduhu wa Rasooluh. Laa hawla wa laa quwwata illaa biLLAH. Hasbiyallaahu laa ilaaha illaa Huwa, 'alayhi tawakkaltu wa Huwa Rabbul-'Arshil-'Azeem. SubhaanALLAH wa bihamdih, SubhaanALLAHil-'azeem, AlhamduliLLAH, Laa ilaaha illa-ALLAH, wa ALLAHU AKBAR, walaa hawla walaa quwwata illaa biLLAH. Astaghfirullaaha wa atoobu ilayh.
+
+
 # Act0 — Always-On Keep-Alive Pinger
 
 Bismillah Ar-Rahman Ar-Raheem. This public repository hosts a fully secure,
-always-running GitHub Actions pinger that keeps wake-on-traffic hosts (for
-example lightning.ai free-plan machines that autosleep when idle) permanently
-awake by sending continuous traffic to their **root** URLs — only the main URL
-wakes the machine; sub-pages do not.
+always-running GitHub Actions pinger that keeps wake-on-traffic hosts 
 
 ## How it stays running (not just once)
 
