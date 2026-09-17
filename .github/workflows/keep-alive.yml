@@ -60,7 +60,10 @@ permissions:
 
 concurrency:
   group: keep-alive-pinger
-  cancel-in-progress: true    # a newer backstop replaces a hung/sleeping run
+  cancel-in-progress: false   # successors queue instead of cancelling the
+                              # parent (runs stay green); the dedup guard plus
+                              # quick guard-exits drain the queue harmlessly —
+                              # every queued run still delivers extra pings
 
 jobs:
   ping:
